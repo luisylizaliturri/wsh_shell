@@ -22,9 +22,10 @@ typedef enum {
 } builtin_cmd_t;
 
 typedef struct History {
-    char *commands[5];
+    char **commands; //dynamically allocated 
     int count;
     int start;
+    int capacity;
 } History;
 
 typedef struct ShellVariable {

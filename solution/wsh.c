@@ -1,11 +1,11 @@
 #include "./wsh.h"
 
-#define HISTORY_SIZE 5
+#define DEFAULT_HISTORY_SIZE 5
 #define MAX_CMD_SIZE 128
 
 //Globals
 static ShellVariable *g_shell_vars_head = NULL; //head of shell vars linked list
-static History g_history = {.commands = {NULL}, .count = 0, .start = 0}; //stores recent command history
+static History g_history = {.commands = NULL, .count = 0, .start = 0}; //stores recent command history
 
 //Utilities
 static char *trim(char *line) {
@@ -90,6 +90,61 @@ static char **parse_line(char *line, int *argc){
 }
 
 //Helper functions
+static void init_history(){
+    g_history.commands = malloc(DEFAULT_HISTORY_SIZE * sizeof(char *));
+    if (g_history.commands == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+    g_history.count = 0;
+    g_history.start = 0;
+    g_history.capacity = DEFAULT_HISTORY_SIZE;
+}
+
+static void set_history_size(int new_size){
+    if (new_size <= 0) {
+        fprintf(stderr, "history: set: invalid size: %d\n", new_size);
+        return;
+    }
+
+    char **new_commands = malloc(new_size * sizeof(char *));
+    if (new_commands == NULL) {
+        perror("malloc");
+        return;
+    }
+
+    //Shrinking history size
+    int keep_count;
+    if(g_history.count < new_size){
+        keep_count = g_history.count;
+    }else{
+        keep_count = new_size;
+    }
+
+    //Copy most recent commands to new histoy list
+    int curr_start_index = (g_history.start + g_history.count - keep_count) % g_history.capacity;
+    for(int i = 0; i < keep_count; i++) {
+        new_commands[i] = g_history.commands[(curr_start_index + i) % g_history.capacity];
+    }
+
+    // // Free any commands that are being discarded (if reducing size)
+    // if (new_size < g_history.count) {
+    //     for(int i = keep_count; i < g_history.count; i++) {
+    //         // These commands have already been moved, so nothing to free
+    //         // If you had pointers to additional structures, free them here
+    //     }
+    // }
+
+    //free old history
+    free(g_history.commands);
+
+    //update history
+    g_history.commands = new_commands;
+    g_history.capacity = new_size;
+    g_history.start = 0;
+    g_history.count = keep_count;
+}
+
 static builtin_cmd_t get_builtin_command(char *cmd) {
     if (strcmp(cmd, "exit") == 0) return CMD_EXIT;
     if (strcmp(cmd, "cd") == 0) return CMD_CD;
@@ -102,24 +157,28 @@ static builtin_cmd_t get_builtin_command(char *cmd) {
 }
 
 static void add_to_history(char* command){
+
+    //check for contiguous duplicate
     if(g_history.count > 0){
-        int last_index = (g_history.start + g_history.count - 1) % HISTORY_SIZE;
+        int last_index = (g_history.start + g_history.count - 1) % g_history.capacity;
         if (strcmp(g_history.commands[last_index], command) == 0) {
             return;
         }
     }
+
     //history is full, remove the oldest command
-    if (g_history.count == HISTORY_SIZE) {
+    if (g_history.count == g_history.capacity) {
         free(g_history.commands[g_history.start]);
         g_history.commands[g_history.start] = strdup(command);
         if (g_history.commands[g_history.start] == NULL) {
             perror("strdup");
             exit(1);
         }
-        g_history.start = (g_history.start + 1) % HISTORY_SIZE;
+        g_history.start = (g_history.start + 1) % g_history.capacity;
     }else {
-        g_history.commands[(g_history.start + g_history.count) % HISTORY_SIZE] = strdup(command);
-        if (g_history.commands[(g_history.start + g_history.count) % HISTORY_SIZE] == NULL) {
+        int index = (g_history.start + g_history.count) % g_history.capacity;
+        g_history.commands[index]= strdup(command);
+        if (g_history.commands[index] == NULL) {
             perror("strdup");
             exit(1);
         }
@@ -179,9 +238,10 @@ static char* get_shell_var(char *name){
 
 static void free_history(){
     for(int i =0; i < g_history.count ; i++){
-        int index = (g_history.start + i) % HISTORY_SIZE;
+        int index = (g_history.start + i) % g_history.capacity;
         free(g_history.commands[index]);
     }
+    free(g_history.commands);
 }
 
 static void free_shell_vars(){
@@ -194,6 +254,7 @@ static void free_shell_vars(){
         free(temp);
     }
 }
+
 //Execute builtin commands
 void execute_vars(){
     ShellVariable *current = g_shell_vars_head;
@@ -309,16 +370,15 @@ void execute_history(char **args, int argc){
             fprintf(stderr, "history: set: invalid size: %s\n", args[2]);
             return;
         }
-
-        //TODO: implement set size
-
+        set_history_size(size);
+        return;
     }else if(argc == 2){
         int command_num = atoi(args[1]);
         if(command_num <= 0 || command_num > g_history.count){
             fprintf(stderr, "history: %d: event not found\n", command_num);
             return;
         }
-        int index = (g_history.start + g_history.count - command_num) % HISTORY_SIZE;
+        int index = (g_history.start + g_history.count - command_num) % g_history.capacity;
         char *command_str = g_history.commands[index];
         printf("%s\n", command_str);
         char *command_str_copy = strdup(command_str);
@@ -354,7 +414,7 @@ void execute_history(char **args, int argc){
         free(command_str_copy);
     }else if(argc == 1){
         for(int i = 0; i < g_history.count; i++){
-            int index = (g_history.start + g_history.count - 1 - i) % HISTORY_SIZE;
+            int index = (g_history.start + g_history.count - 1 - i) % g_history.capacity;
             printf("%d) %s\n", i +1, g_history.commands[index]);
         }
     }
@@ -523,6 +583,8 @@ int main(int argc, char* argv[]){
         perror("wsh: setenv");
         exit(1);
     }
+
+    init_history();
 
     run_loop(input_stream); //main program loop
 
