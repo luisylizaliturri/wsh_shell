@@ -1,0 +1,27 @@
+# This is a comment line (wsh should ignore this line)
+     echo Hello World      
+
+# List the contents of the current directory
+      ls      
+
+# Change to the home directory
+     cd ~    
+
+# Print the current directory after cd
+      pwd      
+
+# Create a new directory (optional, this may not work depending on your file permissions)
+mkdir test_directory
+
+# List the environment variables
+env
+
+# Set a local shell variable and use it
+local myvar=/home
+echo $myvar
+
+# Show the history of the commands executed
+history
+
+# Exit the shell
+exit
