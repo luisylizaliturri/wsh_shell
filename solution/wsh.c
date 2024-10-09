@@ -210,15 +210,35 @@ void execute_local(char **args, int argc){
     }
     char *arg = args[1];
     char *equal_sign = strchr(arg, '=');
-    if (equal_sign == NULL) {
+    if(equal_sign == NULL) {
         fprintf(stderr, "local: invalid argument: %s\n", arg);
         return;
     }
     //split variable into name and value
     *equal_sign = '\0';
-    char *var = arg;
+    char *name = arg;
     char *value = equal_sign + 1;
-    set_shell_var(var, value);
+    if(value[0] == '$'){
+        char *var_name = value +1;
+        char *var_value = getenv(var_name);
+        if(var_value == NULL){
+            var_value = get_shell_var(var_name);
+        }
+        if(var_value != NULL){
+            value = strdup(var_value);
+            if(value == NULL){
+                perror("strdup");
+                exit(1);
+            }
+        }else{
+            value = strdup("");
+            if(value ==NULL){
+                perror("strdup");
+                exit(1);
+            }
+        }
+    }
+    set_shell_var(name, value);
     return;
 }
 
