@@ -1,16 +1,15 @@
 #ifndef WSH_SHELL_H
 #define WSH_SHELL_H
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <dirent.h>
-#include <fcntl.h>
-#include <unistd.h> 
+#include <stdio.h>      
+#include <stdlib.h>     
+#include <string.h>     //string functions(strcpy, strlen, strcmp,...)
+#include <unistd.h>     //POSIX API (fork, execv, dup, dup2)
+#include <ctype.h>      //char handling(isspace, isdigit)
+#include <sys/types.h>  //datatypes used in sys class
+#include <sys/wait.h>   //wait on child processes (wait, waitpid)
+#include <dirent.h>     //directory operations (opendir, readdir, closedir)
+#include <fcntl.h>      //file control (open, O_RDONLY, O_WRONLY)
 
 typedef enum {
     REDIR_NONE,
@@ -60,20 +59,20 @@ static char **parse_line(char *line, int *argc, Redirection *redir);
 //Helper functions
 static RedirectionType get_redirection_type(char *token, int *fd);
 static builtin_cmd_t get_builtin_command(char *cmd);
-static void add_to_history(char* command);
-static void set_shell_var(char *name, char *value);
+static int add_to_history(char* command);
+static int set_shell_var(char *name, char *value);
 static char* get_shell_var(char *name);
 static void free_history();
 static void free_shell_vars();
-
-void execute_vars();
-void execute_local(char **args, int argc);
-void execute_export(char **args, int argc);
-void execute_cd(char **args, int argc);
+int execute_vars();
+int execute_local(char **args, int argc);
+int execute_export(char **args, int argc);
+int execute_cd(char **args, int argc);
 void execute_exit(int argc);
-void execute_history(char **args, int argc);
-void execute_ls();
+int execute_history(char **args, int argc);
+int execute_ls();
 
+//Main functions
 void execute_external_cmd(char **args, char *command_str, int from_history, Redirection *redir);
 void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *redir);
 void run_loop(FILE *input_stream);

@@ -1,7 +1,6 @@
 Makefile
-out.txt
-script.wsh
-test_mkdir
+README.md
+myprogram
 wsh
 wsh-dbg
 wsh.c

@@ -6,8 +6,9 @@
 //Globals
 static ShellVariable *g_shell_vars_head = NULL; //head of shell vars linked list
 static History g_history = {.commands = NULL, .count = 0, .start = 0}; //stores recent command history
+int g_status = 0;
 
-//Utilities
+//Helpers
 static int compare(const void *a, const void *b){
     const char **str_a = (const char **)a;
     const char **str_b = (const char **)b;
@@ -42,7 +43,7 @@ static char *read_line(FILE *input_stream){
     return line;
 }
 
-static char **parse_line(char *line, int *argc, Redirection *redir) {
+static char **parse_line(char *line, int *argc, Redirection *redir){
     int buffer_size = MAX_CMD_SIZE;
     char **tokens = malloc(buffer_size * sizeof(char*));
     if (!tokens) {
@@ -50,16 +51,16 @@ static char **parse_line(char *line, int *argc, Redirection *redir) {
         exit(1);
     }
 
-    // Initialize redirection structure
+    //initialize redirection struct
     redir->type = REDIR_NONE;
-    redir->fd = STDOUT_FILENO;  // Default to stdout
+    redir->fd = STDOUT_FILENO;  //default is stdout
     redir->file = NULL;
 
     char *token;
     *argc = 0;
     token = strtok(line, " ");
     while (token) {
-        // Check for variable substitution
+        //check for variable sub
         if (token[0] == '$') {
             char *name = token + 1;
             char *value = getenv(name);
@@ -70,21 +71,23 @@ static char **parse_line(char *line, int *argc, Redirection *redir) {
                 tokens[*argc] = strdup(value);
                 if (tokens[*argc] == NULL) {
                     perror("strdup");
-                    exit(1);
+                    g_status = -1;
+                    return NULL;
                 }
             } else {
                 tokens[*argc] = strdup("");
                 if (tokens[*argc] == NULL) {
                     perror("strdup");
-                    exit(1);
+                    g_status = -1;
+                    return NULL;
                 }
             }
-        }else{// Check for redirection with file descriptor
+        }else{//check redirection with file descriptor
             int fd = -1;
             char *redir_operator = NULL;
             redir->type = get_redirection_type(token, &fd);
 
-            //Extract file
+            //extract file
             if ((redir_operator = strstr(token, ">>")) != NULL) {
                 redir->file = strdup(redir_operator + 2); 
             } else if ((redir_operator = strstr(token, ">")) != NULL) {
@@ -102,14 +105,17 @@ static char **parse_line(char *line, int *argc, Redirection *redir) {
                     fprintf(stderr, "wsh: syntax error near unexpected token '%s'\n", token);
                     break;
                 }
-
-                redir->fd = (fd == -1) ? STDOUT_FILENO : fd;
-                //continue;  //Dont add to arguments
+                if(redir->type == REDIR_INPUT){
+                    redir->fd = (fd == -1) ? STDIN_FILENO : fd;
+                }else{
+                    redir->fd = (fd == -1) ? STDOUT_FILENO : fd;
+                }
             }else{
                 tokens[*argc] = strdup(token);
                 if (tokens[*argc] == NULL) {
                     perror("strdup");
-                    exit(1);
+                    g_status = -1;
+                    return NULL;
                 }
             }
         }
@@ -119,7 +125,7 @@ static char **parse_line(char *line, int *argc, Redirection *redir) {
             buffer_size += MAX_CMD_SIZE;
             tokens = realloc(tokens, buffer_size * sizeof(char*));
             if (!tokens) {
-                perror("realloc error");
+                perror("realloc");
                 exit(1);
             }
         }
@@ -132,16 +138,15 @@ static char **parse_line(char *line, int *argc, Redirection *redir) {
 static RedirectionType get_redirection_type(char *token, int *fd){
     char *redir_pos = token;
 
-    //extract the file descriptor, if any
+    //extract the file descriptor
     while (isdigit(*redir_pos)) {
-        redir_pos++;  // Move pointer past the digits
+        redir_pos++; 
     }
 
     if (redir_pos != token) { //fd is found
         *fd = atoi(token);
     }
 
-    // Now redir_pos points to the redirection operator (e.g., '>', '>>', '&>')
     if (strncmp(redir_pos, "&>>", 3) == 0) {
         return REDIR_OUTPUT_ERROR_APPEND;
     }
@@ -158,7 +163,7 @@ static RedirectionType get_redirection_type(char *token, int *fd){
         return REDIR_INPUT;
     }
 
-    // No redirection found
+    //no redirection found
     return REDIR_NONE;
 }
 
@@ -173,19 +178,19 @@ static void init_history(){
     g_history.capacity = DEFAULT_HISTORY_SIZE;
 }
 
-static void set_history_size(int new_size){
+static int set_history_size(int new_size){
     if (new_size <= 0) {
-        fprintf(stderr, "history: set: invalid size: %d\n", new_size);
-        return;
+        fprintf(stderr, "history: set invalid size: %d\n", new_size);
+        return -1;
     }
 
     char **new_commands = malloc(new_size * sizeof(char *));
     if (new_commands == NULL) {
         perror("malloc");
-        return;
+        exit(1);
     }
 
-    //Shrinking history size
+    //decreasing history size
     int keep_count;
     if(g_history.count < new_size){
         keep_count = g_history.count;
@@ -193,21 +198,12 @@ static void set_history_size(int new_size){
         keep_count = new_size;
     }
 
-    //Copy most recent commands to new histoy list
+    //copy recent commands to new histoy list
     int curr_start_index = (g_history.start + g_history.count - keep_count) % g_history.capacity;
     for(int i = 0; i < keep_count; i++) {
         new_commands[i] = g_history.commands[(curr_start_index + i) % g_history.capacity];
     }
 
-    // // Free any commands that are being discarded (if reducing size)
-    // if (new_size < g_history.count) {
-    //     for(int i = keep_count; i < g_history.count; i++) {
-    //         // These commands have already been moved, so nothing to free
-    //         // If you had pointers to additional structures, free them here
-    //     }
-    // }
-
-    //free old history
     free(g_history.commands);
 
     //update history
@@ -215,6 +211,7 @@ static void set_history_size(int new_size){
     g_history.capacity = new_size;
     g_history.start = 0;
     g_history.count = keep_count;
+    return 0;
 }
 
 static builtin_cmd_t get_builtin_command(char *cmd) {
@@ -228,13 +225,12 @@ static builtin_cmd_t get_builtin_command(char *cmd) {
     return NOT_BUILT_IN;
 }
 
-static void add_to_history(char* command){
-
+static int add_to_history(char* command){
     //check for contiguous duplicate
     if(g_history.count > 0){
         int last_index = (g_history.start + g_history.count - 1) % g_history.capacity;
         if (strcmp(g_history.commands[last_index], command) == 0) {
-            return;
+            return 0;
         }
     }
 
@@ -244,7 +240,7 @@ static void add_to_history(char* command){
         g_history.commands[g_history.start] = strdup(command);
         if (g_history.commands[g_history.start] == NULL) {
             perror("strdup");
-            exit(1);
+            return -1;
         }
         g_history.start = (g_history.start + 1) % g_history.capacity;
     }else {
@@ -252,32 +248,33 @@ static void add_to_history(char* command){
         g_history.commands[index]= strdup(command);
         if (g_history.commands[index] == NULL) {
             perror("strdup");
-            exit(1);
+            return -1;
         }
         g_history.count++;
-    }    
+    }  
+    return 0;  
 }
 
-static void set_shell_var(char *name, char *value) {
+static int set_shell_var(char *name, char *value) {
     ShellVariable *current = g_shell_vars_head;
 
-    // Check if the variable already exists in the list
+    //check if the variable already exists in list
     while (current != NULL) {
         if (strcmp(current->name, name) == 0) {
-            // Variable exists, update the value
+            //update the value
             char *new_value = strdup(value);
             if (new_value == NULL) {
                 perror("strdup");
-                exit(1);
+                return -1;
             }
             free(current->value);
             current->value = new_value;
-            return;
+            return 0;
         }
         current = current->next;
     }
 
-    // Create a new ShellVariable
+    //create a new variable
     ShellVariable *new_var = malloc(sizeof(ShellVariable));
     if (new_var == NULL) {
         perror("malloc");
@@ -287,14 +284,14 @@ static void set_shell_var(char *name, char *value) {
     if (new_var->name == NULL) {
         perror("strdup");
         free(new_var);
-        exit(1);
+        return -1;
     }
     new_var->value = strdup(value);
     if (new_var->value == NULL) {
         perror("strdup");
         free(new_var->name);
         free(new_var);
-        exit(1);
+        return -1;
     }
     new_var->next = NULL;
 
@@ -307,6 +304,7 @@ static void set_shell_var(char *name, char *value) {
         }
         tail->next = new_var;
     }
+    return 0;
 }
 
 static char* get_shell_var(char *name){
@@ -339,25 +337,26 @@ static void free_shell_vars(){
     }
 }
 
-//Execute builtin commands
-void execute_vars(){
+//execute builtin commands
+int execute_vars(){
     ShellVariable *current = g_shell_vars_head;
     while (current != NULL) {
         printf("%s=%s\n", current->name, current->value);
         current = current->next;
     }
+    return 0;
 }
 
-void execute_local(char **args, int argc){
+int execute_local(char **args, int argc){
     if (argc != 2) {
         fprintf(stderr, "local: usage: local VAR=value\n");
-        return;
+        return -1;
     }
     char *arg = args[1];
     char *equal_sign = strchr(arg, '=');
     if(equal_sign == NULL) {
         fprintf(stderr, "local: invalid argument: %s\n", arg);
-        return;
+        return -1;
     }
     //split variable into name and value
     *equal_sign = '\0';
@@ -373,31 +372,30 @@ void execute_local(char **args, int argc){
             value = strdup(var_value);
             if(value == NULL){
                 perror("strdup");
-                exit(1);
+                return -1;
             }
         }else{
             value = strdup("");
             if(value ==NULL){
                 perror("strdup");
-                exit(1);
+                return -1;
             }
         }
     }
-    set_shell_var(name, value);
-    return;
+    int status = set_shell_var(name, value);
+    return status;
 }
 
-void execute_export(char **args, int argc){
-    printf("Executing command: export\n");
+int execute_export(char **args, int argc){
     if (argc != 2) {
         fprintf(stderr, "export: usage: export VAR=value\n");
-        return;
+        return -1;
     }
     char *arg = args[1];
     char *equal_sign = strchr(arg, '=');
     if (equal_sign == NULL) {
         fprintf(stderr, "export: invalid argument: %s\n", arg);
-        return;
+        return -1;
     }
 
     //split variable into name and value
@@ -406,30 +404,32 @@ void execute_export(char **args, int argc){
     char *value = equal_sign + 1;
     if (setenv(var, value, 1) != 0) {
         perror("export");
+        return -1;
     }
-    return;
+    return 0;
 }
 
-void execute_cd(char **args, int argc){
+int execute_cd(char **args, int argc){
      if(argc < 2){
         char *home = getenv("HOME");
         if(home == NULL){
             fprintf(stderr, "cd: HOME not set\n");
-            return;
+            return -1;
         }
         if(chdir(home) != 0){
-            perror("cd");
-            exit(1);
+            perror("chdir");
+            return -1;
         }
     }else if(argc == 2){
         if(chdir(args[1]) != 0){
             perror("cd error");
-            exit(1);
+            return -1;
         }
     }else{
         fprintf(stderr, "cd: too many arguments\n");
-        return;
+        return -1;
     }
+    return 0;
 }
 
 void execute_exit(int argc){
@@ -439,28 +439,32 @@ void execute_exit(int argc){
         return;
     }
     fprintf(stderr, "exit: too many arguments\n");
+    g_status = -1;
     return;
 }
 
-void execute_history(char **args, int argc){
+int execute_history(char **args, int argc){
     if(argc > 3){
         fprintf(stderr, "history: too many arguments\n");
-        return;
+        return -1;
     }
     
     if(argc == 3 && strcmp(args[1], "set") == 0){
         int size = atoi(args[2]);
         if(size <= 0){
             fprintf(stderr, "history: set: invalid size: %s\n", args[2]);
-            return;
+            return -1;
         }
-        set_history_size(size);
-        return;
+        if(set_history_size(size) == -1){
+            perror("set_history_size");
+            return -1;
+        }
+        return 0;
     }else if(argc == 2){
         int command_num = atoi(args[1]);
         if(command_num <= 0 || command_num > g_history.count){
             fprintf(stderr, "history: %d: event not found\n", command_num);
-            return;
+            return -1;
         }
         int index = (g_history.start + g_history.count - command_num) % g_history.capacity;
         char *command_str = g_history.commands[index];
@@ -470,7 +474,7 @@ void execute_history(char **args, int argc){
             perror("strdup");
             free_history();
             free_shell_vars();
-            exit(1);
+            return -1;
         }
         Redirection redir;
         int arg_count = 0;
@@ -478,7 +482,7 @@ void execute_history(char **args, int argc){
         if(parsed_command == NULL){
             fprintf(stderr, "history: parse_line failed\n");
             free(command_str_copy);
-            return;
+            return -1;
         }
         if(parsed_command[0] != NULL){
             builtin_cmd_t command = get_builtin_command(parsed_command[0]);
@@ -489,7 +493,7 @@ void execute_history(char **args, int argc){
             }
         }else{
             perror("parse_line");
-            exit(1);
+            return -1;
         }
         for(int i = 0; i < arg_count; i++) {
             free(parsed_command[i]);
@@ -502,9 +506,10 @@ void execute_history(char **args, int argc){
             printf("%d) %s\n", i +1, g_history.commands[index]);
         }
     }
+    return 0;
 }
 
-void execute_ls() {
+int execute_ls() {
     DIR *d;
     struct dirent *dir;
     char **filenames = NULL;
@@ -513,7 +518,7 @@ void execute_ls() {
     d = opendir(".");
     if (!d) {
         perror("ls");
-        exit(1);
+        return -1;
     }
     filenames = malloc(capacity * sizeof(char *));
     if (filenames == NULL) {
@@ -542,7 +547,7 @@ void execute_ls() {
         if (filenames[count] == NULL) {
             perror("strdup");
             closedir(d);
-            exit(1);
+            return -1;
         }
 
         count++;
@@ -555,11 +560,12 @@ void execute_ls() {
     }
     free(filenames);
     closedir(d);
+    return 0;
 }
 
 //Main functions
 void execute_external_cmd(char **args, char *command_str, int from_history, Redirection *redir){
-    pid_t pid; // Process ID of the child process
+    pid_t pid; // pid of the child process
     pid_t wpid;
     int status;
     char *path_env = getenv("PATH");
@@ -569,124 +575,129 @@ void execute_external_cmd(char **args, char *command_str, int from_history, Redi
     int saved_stderr = -1;
     int fd;
 
-    // If PATH is not found, fall back to "/bin"
     if (!path_env) {
         path_env = "/bin";
     }
 
-    // Tokenize PATH environment variable to get the list of directories
+    //get the list of directories from PATH
     char *token = strtok(path_env, ":");
     while (token != NULL) {
-        // Allocate enough space for the directory, slash, and the command
-        path = malloc(strlen(token) + strlen(args[0]) + 2);  // +2 for '/' and '\0'
+        path = malloc(strlen(token) + strlen(args[0]) + 2); 
         if (!path) {
             perror("malloc");
-            return;
+            g_status = -1;
+            exit(1);
         }
 
-        // Construct the full path to the executable
+        //construct the path to executable
         sprintf(path, "%s/%s", token, args[0]);
 
-        // Check if the file exists and is executable
-        if (access(path, X_OK) == 0) {
-            break;  // Found the executable
+        //check if the file exists
+        if(access(path, X_OK) == 0) {
+            break;  //found 
         }
-
-        // Free and try the next directory
         free(path);
         path = NULL;
         token = strtok(NULL, ":");
     }
 
-    if (path == NULL) {
-        fprintf(stderr, "wsh: command not found: %s\n", args[0]);
+    if(path == NULL) {
+        g_status = -1;
         return;
     }
 
-    // Fork a child process
+    //fork  child process
     pid = fork();
     if (pid == 0) {
-        // Child process: handle redirection before executing the command
-
-        // If there is any redirection, handle it
-        if (redir->type != REDIR_NONE) {
+        //child process: handle redirection before executing the command
+        if (redir->type != REDIR_NONE){
             if (redir->type == REDIR_OUTPUT || redir->type == REDIR_OUTPUT_APPEND) {
                 fd = open(redir->file, O_WRONLY | O_CREAT | (redir->type == REDIR_OUTPUT_APPEND ? O_APPEND : O_TRUNC), 0644);
                 if (fd < 0) {
                     perror("open");
-                    exit(1);
+                    g_status = -1;
+                    return;
                 }
-                // Save current stdout
+                //save current stdout
                 saved_stdout = dup(STDOUT_FILENO);
-                // Redirect stdout to the file
-                if (dup2(fd, STDOUT_FILENO) < 0) {
+                //redirect stdout to the file
+                if (dup2(fd, redir->fd) < 0) {
                     perror("dup2");
                     close(fd);
-                    exit(1);
+                    g_status = -1;
+                    return;
                 }
-                close(fd); // No need to keep this fd open anymore
-            } else if (redir->type == REDIR_INPUT) {
+                close(fd);
+            } else if(redir->type == REDIR_INPUT) {
                 fd = open(redir->file, O_RDONLY);
                 if (fd < 0) {
                     perror("open");
-                    exit(1);
+                    g_status = -1;
+                    return;
                 }
-                // Save current stdin
+                //save current stdin for later
                 saved_stdin = dup(STDIN_FILENO);
-                // Redirect stdin to the file
-                if (dup2(fd, STDIN_FILENO) < 0) {
+                if(dup2(fd, redir->fd) < 0) {
                     perror("dup2");
                     close(fd);
-                    exit(1);
+                    g_status = -1;
+                    return;
                 }
-                close(fd); // No need to keep this fd open anymore
+                close(fd);
             } else if (redir->type == REDIR_OUTPUT_ERROR || redir->type == REDIR_OUTPUT_ERROR_APPEND) {
                 fd = open(redir->file, O_WRONLY | O_CREAT | (redir->type == REDIR_OUTPUT_ERROR_APPEND ? O_APPEND : O_TRUNC), 0644);
-                if (fd < 0) {
+                if(fd < 0) {
                     perror("open");
-                    exit(1);
+                    g_status = -1;
+                    return;
                 }
-                // Save current stdout and stderr
+                //save current stdout and stderr
                 saved_stdout = dup(STDOUT_FILENO);
                 saved_stderr = dup(STDERR_FILENO);
-                // Redirect stdout and stderr to the file
                 if (dup2(fd, STDOUT_FILENO) < 0 || dup2(fd, STDERR_FILENO) < 0) {
                     perror("dup2");
                     close(fd);
-                    exit(1);
+                    g_status = -1;
+                    return;
                 }
-                close(fd); // No need to keep this fd open anymore
+                close(fd); 
             }
         }
-
-        // Execute the command
-        if (execv(path, args) == -1) {
+        
+        if(execv(path, args) == -1) {
             perror("wsh");
-            exit(1);  // If execv fails, exit
+            g_status = -1; 
+            //exit(g_status);
+            return;
         }
-    } else if (pid < 0) {
-        // Fork failed
+    }else if(pid < 0) {
+        //fork failed
         perror("wsh: fork");
+        g_status = -1;
         return;
-    } else {
-        // Parent process: wait for the child to complete
+    }else{
+        //parent process waits for the child to complete
         while (1) {
             wpid = waitpid(pid, &status, WUNTRACED);
-            if (wpid == -1) {
-                perror("wsh: waitpid");
+            if(wpid == -1) {
+                perror("waitpid");
+                g_status = -1;
                 return;
             }
-            if (WIFEXITED(status) || WIFSIGNALED(status)) {
+            if(WIFEXITED(status) || WIFSIGNALED(status)) {
                 break;
             }
         }
     }
-    if (!from_history) {
-        add_to_history(command_str);
+    if(!from_history) {
+        if(add_to_history(command_str) == -1){
+            g_status = -1;
+            return;
+        }
     }
     free(path);
 
-    // Restore original stdout, stdin, stderr
+    //restore original stdout, stdin, stderr
     if (saved_stdout >= 0) {
         dup2(saved_stdout, STDOUT_FILENO);
         close(saved_stdout);
@@ -699,12 +710,14 @@ void execute_external_cmd(char **args, char *command_str, int from_history, Redi
         dup2(saved_stdin, STDIN_FILENO);
         close(saved_stdin);
     }
+    g_status = 0; //success
+    return;
 }
 
 void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *redir){
-     int saved_stdout = -1;
-     int saved_stderr = -1;
-     int saved_stdin = -1;
+    int saved_stdout = -1;
+    int saved_stderr = -1;
+    int saved_stdin = -1;
 
     if (redir->type != REDIR_NONE) {
         int fd;
@@ -713,6 +726,7 @@ void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *
             fd = open(redir->file, O_WRONLY | O_CREAT | (redir->type == REDIR_OUTPUT_APPEND ? O_APPEND : O_TRUNC), 0644);
             if (fd < 0) {
                 perror("open");
+                g_status = -1;
                 return;
             }
             saved_stdout = dup(STDOUT_FILENO);  //save current stdout
@@ -720,6 +734,7 @@ void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *
             // Redirect stdout or the file descriptor provided by redir->fd
             if (dup2(fd, redir->fd) < 0) {  
                 perror("dup2");
+                g_status = -1;
                 close(fd);
                 return;
             }
@@ -728,12 +743,14 @@ void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *
             fd = open(redir->file, O_RDONLY);
             if (fd < 0) {
                 perror("open");
+                g_status = -1;
                 return;
             }
             saved_stdin = dup(STDIN_FILENO);  //save current stdin
             // Redirect stdin or the file descriptor provided by redir->fd
             if (dup2(fd, redir->fd) < 0) {  
                 perror("dup2");
+                g_status = -1;
                 close(fd);
                 return;
             }
@@ -749,6 +766,7 @@ void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *
             //redirect stdout and stderr or the file descriptor provided by redir->fd
             if (dup2(fd, redir->fd) < 0 || dup2(fd, STDERR_FILENO) < 0) {
                 perror("dup2");
+                g_status = -1;
                 close(fd);
                 return;
             }
@@ -761,25 +779,25 @@ void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *
             execute_exit(argc);
             break;
         case CMD_CD:
-            execute_cd(args, argc);
+            g_status = execute_cd(args, argc);
             break;
         case CMD_EXPORT:
-            execute_export(args, argc);
+            g_status = execute_export(args, argc);
             break;
         case CMD_LOCAL:
-            execute_local(args, argc);
+            g_status = execute_local(args, argc);
             break;
         case CMD_VARS:
-            execute_vars();
+            g_status = execute_vars();
             break;
         case CMD_HISTORY:
-            execute_history(args, argc);
+            g_status = execute_history(args, argc);
             break;
         case CMD_LS:
-            execute_ls();
+            g_status = execute_ls();
             break;
         default:
-            return;
+            break;
     }
 
     // Restore original stdout, stdin, and stderr if they were redirected
@@ -819,6 +837,7 @@ void run_loop(FILE *input_stream){
 
         if(trimmed_line[0] == '#' || trimmed_line[0] == '\0'){
             free(line);
+            g_status = -1;
             continue;
         }
 
@@ -826,7 +845,8 @@ void run_loop(FILE *input_stream){
         if(command_str_copy == NULL){
             perror("strdup");
             free(line);
-            exit(1);
+            g_status = -1;
+            return;
         }
 
         parsed_command = parse_line(trimmed_line, &argc, &redir);
@@ -841,7 +861,7 @@ void run_loop(FILE *input_stream){
             free(command_str_copy);
             free(parsed_command);
             free(line);
-            exit(0);
+            exit(g_status);
         }else if(command == NOT_BUILT_IN){
             execute_external_cmd(parsed_command,command_str_copy, 0, &redir);
             free(command_str_copy);
@@ -857,26 +877,27 @@ void run_loop(FILE *input_stream){
         free(parsed_command);
         free(line);
     }
+    return;
 }
 
 int main(int argc, char* argv[]){
     FILE *input_stream = stdin; //default is interactive mode
     if(argc > 2){
         printf("Usage: %s <script_file>\n", argv[0]);
-        exit(1);
+        exit(-1);
     }
     if(argc == 2){ //batch mode
         input_stream = fopen(argv[1], "r");
         if(input_stream == NULL){
             perror("Input stream is NULL");
-            exit(1);
+            exit(-1);
         }
     }
 
     //set initial PATH variable
     if(setenv("PATH", "/bin", 1) != 0){
         perror("wsh: setenv");
-        exit(1);
+        exit(-1);
     }
 
     init_history();
@@ -886,5 +907,5 @@ int main(int argc, char* argv[]){
     if(input_stream != stdin){
         fclose(input_stream);
     }
-    return 0;
+    return g_status;
 }

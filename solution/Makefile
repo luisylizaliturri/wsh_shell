@@ -1,10 +1,11 @@
-# Variables
+#Variables
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -pedantic -std=gnu18
-LOGIN = yourlogin
-SUBMITPATH = /path/to/submit
+LOGIN = ylizaliturri
+SUBMITPATH = /home/cs537-1/handin/ylizaliturri
+PROJECTPATH = /home/ylizaliturri/private/cs537/p3
 
-# Targets
+#Targets
 all: wsh wsh-dbg
 
 wsh: wsh.c wsh.h
@@ -13,8 +14,12 @@ wsh: wsh.c wsh.h
 wsh-dbg: wsh.c wsh.h
 	$(CC) $(CFLAGS) -Og -ggdb -o $@ $^
 
+
+clean-tests:
+	rm -f *.test *.wsh
+
 clean:
-	rm -f wsh wsh-dbg
+	rm -f wsh wsh-dbg 
 
 submit:
-	cp wsh.c wsh.h Makefile $(SUBMITPATH)
+	cp -rf $(PROJECTPATH) $(SUBMITPATH)
