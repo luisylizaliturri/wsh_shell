@@ -9,6 +9,23 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <unistd.h> 
+
+typedef enum {
+    REDIR_NONE,
+    REDIR_INPUT,               // <
+    REDIR_OUTPUT,              // >
+    REDIR_OUTPUT_APPEND,       // >>
+    REDIR_OUTPUT_ERROR,        // &>
+    REDIR_OUTPUT_ERROR_APPEND  // &>>
+} RedirectionType;
+
+typedef struct Redirection {
+    RedirectionType type;
+    int fd;       //file descriptor number
+    char *file;   //target file
+} Redirection;
 
 typedef enum {
     CMD_EXIT,
@@ -35,11 +52,13 @@ typedef struct ShellVariable {
 } ShellVariable;
 
 //Utilities
+static int compare(const void *a, const void *b);
 static char *trim(char *line);
 static char *read_line(FILE *input_stream);
-static char **parse_line(char *line, int *argc);
+static char **parse_line(char *line, int *argc, Redirection *redir);
 
 //Helper functions
+static RedirectionType get_redirection_type(char *token, int *fd);
 static builtin_cmd_t get_builtin_command(char *cmd);
 static void add_to_history(char* command);
 static void set_shell_var(char *name, char *value);
@@ -55,8 +74,8 @@ void execute_exit(int argc);
 void execute_history(char **args, int argc);
 void execute_ls();
 
-void execute_external_cmd(char **args, char *command_str, int from_history);
-void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc);
+void execute_external_cmd(char **args, char *command_str, int from_history, Redirection *redir);
+void execute_builtin_cmd(builtin_cmd_t cmd, char **args, int argc, Redirection *redir);
 void run_loop(FILE *input_stream);
 int main(int argc, char* argv[]);
 
