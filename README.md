@@ -1,4 +1,4 @@
-# FUSE file system
+# WSH Linux shell
 - "wsh" shell CLI
 - Linux only
 
